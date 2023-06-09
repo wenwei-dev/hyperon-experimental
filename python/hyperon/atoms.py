@@ -2,19 +2,17 @@ import hyperonpy as hp
 from hyperonpy import AtomKind
 from typing import Union
 
-class Atom:
 
+class Atom:
     def __init__(self, catom):
         self.catom = catom
 
     def __del__(self):
-        #import sys; sys.stderr.write("Atom._del_(" + str(self) + ")\n"); sys.stderr.flush()
+        # import sys; sys.stderr.write("Atom._del_(" + str(self) + ")\n"); sys.stderr.flush()
         hp.atom_free(self.catom)
 
-
     def __eq__(self, other):
-        return (isinstance(other, Atom) and
-                hp.atom_eq(self.catom, other.catom))
+        return isinstance(other, Atom) and hp.atom_eq(self.catom, other.catom)
 
     def __repr__(self):
         return hp.atom_to_str(self.catom)
@@ -36,6 +34,7 @@ class Atom:
         else:
             raise Exception("Unexpected type of the atom: " + str(type))
 
+
 class SymbolAtom(Atom):
 
     def __init__(self, catom):
@@ -44,8 +43,10 @@ class SymbolAtom(Atom):
     def get_name(self):
         return hp.atom_get_name(self.catom)
 
+
 def S(name):
     return SymbolAtom(hp.atom_sym(name))
+
 
 class VariableAtom(Atom):
 
@@ -55,8 +56,10 @@ class VariableAtom(Atom):
     def get_name(self):
         return hp.atom_get_name(self.catom)
 
+
 def V(name):
     return VariableAtom(hp.atom_var(name))
+
 
 class ExpressionAtom(Atom):
 
@@ -70,6 +73,7 @@ class ExpressionAtom(Atom):
 def E(*args):
     return ExpressionAtom(hp.atom_expr([atom.catom for atom in args]))
 
+
 class AtomType:
 
     UNDEFINED = Atom._from_catom(hp.CAtomType.UNDEFINED)
@@ -79,6 +83,7 @@ class AtomType:
     VARIABLE = Atom._from_catom(hp.CAtomType.VARIABLE)
     EXPRESSION = Atom._from_catom(hp.CAtomType.EXPRESSION)
     GROUNDED = Atom._from_catom(hp.CAtomType.GROUNDED)
+
 
 class GroundedAtom(Atom):
 
@@ -91,25 +96,34 @@ class GroundedAtom(Atom):
     def get_grounded_type(self):
         return Atom._from_catom(hp.atom_get_grounded_type(self.catom))
 
+
 def G(object, type=AtomType.UNDEFINED):
-    assert hasattr(object, "copy"), "Method copy should be implemented by grounded object"
+    assert hasattr(
+        object, "copy"
+    ), "Method copy should be implemented by grounded object"
     return GroundedAtom(hp.atom_gnd(object, type.catom))
+
 
 def call_execute_on_grounded_atom(gnd, typ, args):
     # ... if hp.atom_to_str(typ) == AtomType.UNDEFINED
-    res_typ = AtomType.UNDEFINED if hp.atom_get_type(typ) != AtomKind.EXPR \
+    res_typ = (
+        AtomType.UNDEFINED
+        if hp.atom_get_type(typ) != AtomKind.EXPR
         else Atom._from_catom(hp.atom_get_children(typ)[-1])
+    )
     args = [Atom._from_catom(catom) for catom in args]
     return gnd.execute(*args, res_typ=res_typ)
+
 
 def call_match_on_grounded_atom(gnd, catom):
     return gnd.match_(Atom._from_catom(catom))
 
+
 def atoms_are_equivalent(first, second):
     return hp.atoms_are_equivalent(first.catom, second.catom)
 
-class GroundedObject:
 
+class GroundedObject:
     def __init__(self, content, id=None):
         self.content = content
         self.id = id
@@ -126,8 +140,8 @@ class GroundedObject:
     def copy(self):
         return self
 
-class ValueObject(GroundedObject):
 
+class ValueObject(GroundedObject):
     @property
     def value(self):
         return self.content
@@ -136,11 +150,12 @@ class ValueObject(GroundedObject):
         # TODO: ?typecheck
         return isinstance(other, ValueObject) and self.content == other.content
 
+
 class NoReduceError(Exception):
     pass
 
-class OperationObject(GroundedObject):
 
+class OperationObject(GroundedObject):
     def __init__(self, name, op, unwrap=True):
         super().__init__(op, name)
         self.unwrap = unwrap
@@ -169,15 +184,19 @@ class OperationObject(GroundedObject):
         else:
             result = self.op(*args)
             if not isinstance(result, list):
-                raise RuntimeError("Grounded operation `" + self.name + "` should return list")
+                raise RuntimeError(
+                    "Grounded operation `" + self.name + "` should return list"
+                )
             return result
 
     def __eq__(self, other):
         return isinstance(other, OperationObject) and self.name == other.name
 
+
 class MatchableObject(ValueObject):
     def match_(self, atom):
         raise RuntimeError("MatchableObject::match_() is not implemented")
+
 
 def _type_sugar(type_names):
     if type_names is None:
@@ -185,21 +204,23 @@ def _type_sugar(type_names):
     if isinstance(type_names, list):
         return E(S("->"), *[_type_sugar(n) for n in type_names])
     if isinstance(type_names, str):
-        return V(type_names[1:]) if type_names[0] == '$' else S(type_names)
+        return V(type_names[1:]) if type_names[0] == "$" else S(type_names)
     return type_names
+
 
 def OperationAtom(name, op, type_names=None, unwrap=True):
     return G(OperationObject(name, op, unwrap), _type_sugar(type_names))
 
+
 def ValueAtom(value, type_name=None, atom_id=None):
     return G(ValueObject(value, atom_id), _type_sugar(type_name))
+
 
 def MatchableAtom(value, type_name=None, atom_id=None):
     return G(MatchableObject(value, atom_id), _type_sugar(type_name))
 
 
 class Bindings:
-
     def __init__(self, bindings: Union[hp.CBindings, None] = None):
         if bindings is None:
             self.cbindings = hp.bindings_new()
@@ -211,8 +232,9 @@ class Bindings:
             hp.bindings_free(self.cbindings)
 
     def __eq__(self, other):
-        return (isinstance(other, Bindings) and
-                hp.bindings_eq(self.cbindings, other.cbindings))
+        return isinstance(other, Bindings) and hp.bindings_eq(
+            self.cbindings, other.cbindings
+        )
 
     def __repr__(self):
         return hp.bindings_to_str(self.cbindings)
@@ -235,12 +257,14 @@ class Bindings:
     def merge(left, right):
         return Bindings(hp.bindings_merge(left.cbindings, right.cbindings))
 
-    def merge_v2(left, right) -> 'BindingsSet':
+    def merge_v2(left, right) -> "BindingsSet":
         return BindingsSet(hp.bindings_merge_v2(left.cbindings, right.cbindings))
 
     def add_var_bindings(self, var: Union[str, Atom], atom: Atom) -> bool:
         if isinstance(var, Atom):
-            return hp.bindings_add_var_bindings(self.cbindings, var.get_name(), atom.catom)
+            return hp.bindings_add_var_bindings(
+                self.cbindings, var.get_name(), atom.catom
+            )
         else:
             return hp.bindings_add_var_bindings(self.cbindings, var, atom.catom)
 
@@ -263,8 +287,8 @@ class Bindings:
 
         return iter(result)
 
-class BindingsSet:
 
+class BindingsSet:
     def __init__(self, input: Union[hp.CBindingsSet, Bindings, None] = None):
         if input is None:
             self.c_set = hp.bindings_set_single()
@@ -279,8 +303,9 @@ class BindingsSet:
             self.c_set = None
 
     def __eq__(self, other):
-        return (isinstance(other, BindingsSet) and
-                hp.bindings_set_eq(self.c_set, other.c_set))
+        return isinstance(other, BindingsSet) and hp.bindings_set_eq(
+            self.c_set, other.c_set
+        )
 
     def __repr__(self):
         return hp.bindings_set_to_str(self.c_set)
@@ -317,12 +342,12 @@ class BindingsSet:
     def add_var_equality(self, a: Atom, b: Atom) -> bool:
         return hp.bindings_set_add_var_equality(self.c_set, a.catom, b.catom)
 
-    def merge_into(self, input: Union['BindingsSet', Bindings]):
+    def merge_into(self, input: Union["BindingsSet", Bindings]):
         if isinstance(input, BindingsSet):
-            hp.bindings_set_merge_into(self.c_set, input.c_set);
+            hp.bindings_set_merge_into(self.c_set, input.c_set)
         else:
-            new_set = BindingsSet(input);
-            hp.bindings_set_merge_into(self.c_set, new_set.c_set);
+            new_set = BindingsSet(input)
+            hp.bindings_set_merge_into(self.c_set, new_set.c_set)
 
     def iterator(self):
         res = hp.bindings_set_list(self.c_set)

@@ -4,9 +4,9 @@ import hyperonpy as hp
 from .atoms import Atom, AtomType, OperationAtom
 from .base import GroundingSpace, Tokenizer, SExprParser
 
-class MeTTa:
 
-    def __init__(self, space = None, cwd = ".", cmetta = None):
+class MeTTa:
+    def __init__(self, space=None, cwd=".", cmetta=None):
         if cmetta is not None:
             self.cmetta = cmetta
         else:
@@ -16,16 +16,21 @@ class MeTTa:
             self.cmetta = hp.metta_new(space.cspace, tokenizer.ctokenizer, cwd)
             self.load_py_module("hyperon.stdlib")
             hp.metta_load_module(self.cmetta, "stdlib")
-            self.register_atom('extend-py!',
-                OperationAtom('extend-py!',
-                              lambda name: self.load_py_module(name) or [],
-                              [AtomType.UNDEFINED, AtomType.ATOM], unwrap=False))
+            self.register_atom(
+                "extend-py!",
+                OperationAtom(
+                    "extend-py!",
+                    lambda name: self.load_py_module(name) or [],
+                    [AtomType.UNDEFINED, AtomType.ATOM],
+                    unwrap=False,
+                ),
+            )
 
     def __del__(self):
         hp.metta_free(self.cmetta)
 
     def copy(self):
-        return MeTTa(cmetta = hp.metta_clone(self.cmetta))
+        return MeTTa(cmetta=hp.metta_clone(self.cmetta))
 
     def space(self):
         return GroundingSpace._from_cspace(hp.metta_space(self.cmetta))
@@ -59,13 +64,13 @@ class MeTTa:
         mod = import_module(name)
         for n in dir(mod):
             obj = getattr(mod, n)
-            if '__name__' in dir(obj) and obj.__name__ == 'metta_register':
+            if "__name__" in dir(obj) and obj.__name__ == "metta_register":
                 obj(self)
 
     def import_file(self, fname):
         path = fname.split(os.sep)
         if len(path) == 1:
-            path = ['.'] + path
+            path = ["."] + path
         f = open(os.sep.join(path), "r")
         program = f.read()
         f.close()

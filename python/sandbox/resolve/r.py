@@ -7,10 +7,11 @@ from hyperon.ext import register_atoms
 
 # It also demonstrates a possible way to embed `import` into `extend-py`
 
+
 @register_atoms
 def my_imported_runner_atom():
     # We don't use metta here, but we could...
-    content = '''
+    content = """
         (: fact (-> Number Number))
         (= (fact $x)
            (case $x
@@ -26,10 +27,8 @@ def my_imported_runner_atom():
         something
 
         (= (call_func $f $arg) ($f $arg))
-    '''
+    """
     runner = MeTTa()
     runner.run(content)
     runnerAtom = G(runner, AtomType.ATOM)
-    return {
-        'r': runnerAtom
-    }
+    return {"r": runnerAtom}

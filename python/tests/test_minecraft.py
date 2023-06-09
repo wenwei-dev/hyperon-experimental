@@ -2,44 +2,49 @@ import unittest
 
 from hyperon import *
 
+
 def newInInventory(inventory):
     return OperationAtom(
-        "in-inventory",
-        lambda obj: [ValueAtom(obj in inventory)],
-        unwrap=False)
+        "in-inventory", lambda obj: [ValueAtom(obj in inventory)], unwrap=False
+    )
+
 
 def craft_op(inventory, obj, where, comp):
     print(str(obj) + " crafted in " + str(where) + " from " + str(comp))
     inventory.append(obj)
     return [obj]
 
+
 def newCraftOp(inventory):
     return OperationAtom(
         "craft",
         lambda obj, where, comp: craft_op(inventory, obj, where, comp),
-        unwrap=False)
+        unwrap=False,
+    )
+
 
 def mine_op(inventory, obj, tool):
     print(str(obj) + " mined by " + str(tool))
     inventory.append(obj)
     return [obj]
 
+
 def newMineOp(inventory):
     return OperationAtom(
-        "mine",
-        lambda obj, tool: mine_op(inventory, obj, tool),
-        unwrap=False)
+        "mine", lambda obj, tool: mine_op(inventory, obj, tool), unwrap=False
+    )
+
 
 class MinecraftTest(unittest.TestCase):
-
     def test_minecraft_planning(self):
         metta = MeTTa()
-        inventory = [S('inventory'), S('hands')]
+        inventory = [S("inventory"), S("hands")]
         metta.register_token("in-inventory", lambda _: newInInventory(inventory))
         metta.register_token("craft", lambda _: newCraftOp(inventory))
         metta.register_token("mine", lambda _: newMineOp(inventory))
 
-        metta.run('''
+        metta.run(
+            """
             (= (wood) (spruce-wood))
             (= (spruce-wood) (mine spruce-tree hand))
 
@@ -59,22 +64,30 @@ class MinecraftTest(unittest.TestCase):
 
             (= (stone-pickaxe) (craft stone-pickaxe (crafting-table)
                            (allof (pack 3 cobblestones) (pack 2 sticks))))
-        ''')
+        """
+        )
 
-        self.assertFalse(S('wooden-pickaxe') in inventory)
-        metta.run('!(wooden-pickaxe)')
-        self.assertTrue(S('four-planks') in inventory)
-        self.assertTrue(S('crafting-table') in inventory)
-        self.assertTrue(S('wooden-pickaxe') in inventory)
+        self.assertFalse(S("wooden-pickaxe") in inventory)
+        metta.run("!(wooden-pickaxe)")
+        self.assertTrue(S("four-planks") in inventory)
+        self.assertTrue(S("crafting-table") in inventory)
+        self.assertTrue(S("wooden-pickaxe") in inventory)
 
     def test_minecraft_planning_with_abstractions(self):
         metta = MeTTa()
 
-        inventory = [S('inventory'), S('hands'), S('crafting-table'), S('stick'),
-                     S('iron-ingot'), S('iron-pickaxe')]
+        inventory = [
+            S("inventory"),
+            S("hands"),
+            S("crafting-table"),
+            S("stick"),
+            S("iron-ingot"),
+            S("iron-pickaxe"),
+        ]
         metta.register_token("in-inventory", lambda _: newInInventory(inventory))
 
-        metta.run('''
+        metta.run(
+            """
             (= (can-be-mined diamond) True)
             (= (can-be-made diamond) False)
             (= (diamond mined-using iron-pickaxe) True)
@@ -106,11 +119,13 @@ class MinecraftTest(unittest.TestCase):
 
             (= (get $x) (if (and (not (in-inventory $x)) (can-be-mined $x)) (mine $x) nop))
             (= (get $x) (if (and (not (in-inventory $x)) (can-be-made $x)) (make $x) nop))
-        ''')
+        """
+        )
 
-        metta.run('!(get diamond)')
+        metta.run("!(get diamond)")
         # (, (get iron-pickaxe) (find diamond-ore)
         #    (do-mine diamond diamond-ore iron-pickaxe))
+
 
 if __name__ == "__main__":
     unittest.main()

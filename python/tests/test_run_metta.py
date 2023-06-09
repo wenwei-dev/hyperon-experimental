@@ -3,10 +3,10 @@ import unittest
 from hyperon import MeTTa
 from test_common import HyperonTestCase
 
-class MeTTaTest(HyperonTestCase):
 
+class MeTTaTest(HyperonTestCase):
     def test_run_metta(self):
-        program = '''
+        program = """
             (isa red color)
             (isa green color)
             (isa blue color)
@@ -15,25 +15,27 @@ class MeTTaTest(HyperonTestCase):
 
             (= (f) (+ 2 3))
             !(f)
-        '''
+        """
 
         metta = MeTTa()
-        self.assertEqualMettaRunnerResults(metta.run(program),
-            [metta.parse_all('red  green  blue'), metta.parse_all('5')])
+        self.assertEqualMettaRunnerResults(
+            metta.run(program),
+            [metta.parse_all("red  green  blue"), metta.parse_all("5")],
+        )
 
     def test_run_complex_query(self):
-        program = '''
+        program = """
             (A B)
             (C B)
 
             !(match &self (, (A $x) (C $x)) $x)
-        '''
+        """
 
         result = MeTTa().run(program)
-        self.assertEqual('[[B]]', repr(result))
+        self.assertEqual("[[B]]", repr(result))
 
     def test_list_concatenation(self):
-        program = '''
+        program = """
             (= (Concat (Cons $head1 Nil) $list2)
                (Cons $head1 $list2))
 
@@ -43,29 +45,31 @@ class MeTTaTest(HyperonTestCase):
             (= (lst1) (Cons a1 (Cons a2 Nil)))
             (= (lst2) (Cons b1 (Cons b2 Nil)))
             !(Concat (lst1) (lst2))
-        '''
+        """
 
         result = MeTTa().run(program)
-        self.assertEqual('[[(Cons a1 (Cons a2 (Cons b1 (Cons b2 Nil))))]]', repr(result))
+        self.assertEqual(
+            "[[(Cons a1 (Cons a2 (Cons b1 (Cons b2 Nil))))]]", repr(result)
+        )
 
     def test_comments(self):
-        program = '''
+        program = """
                 (a ; 4)
                   5)
                 !(match &self (a $W) $W)
-            '''
-     
-        result = MeTTa().run(program)
-        self.assertEqual('[[5]]', repr(result))
+            """
 
-        program = '''
+        result = MeTTa().run(program)
+        self.assertEqual("[[5]]", repr(result))
+
+        program = """
                (a  1);
                !(match 
                         &self (a $W) $W)
-           '''
+           """
 
         result = MeTTa().run(program)
-        self.assertEqual('[[1]]', repr(result))
+        self.assertEqual("[[1]]", repr(result))
 
     def process_exceptions(self, results):
         for result in results:
@@ -93,4 +97,3 @@ class MeTTaTest(HyperonTestCase):
         self.process_exceptions(MeTTa().import_file("scripts/e2_states.metta"))
         self.process_exceptions(MeTTa().import_file("scripts/e3_match_states.metta"))
         self.process_exceptions(MeTTa().import_file("scripts/f1_imports.metta"))
-

@@ -3,8 +3,8 @@ import unittest
 from hyperon import *
 from test_common import HyperonTestCase
 
-class GroundingSpaceTest(HyperonTestCase):
 
+class GroundingSpaceTest(HyperonTestCase):
     def test_add(self):
         kb = GroundingSpace()
         kb.add_atom(S("a"))

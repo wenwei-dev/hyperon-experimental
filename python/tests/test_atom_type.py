@@ -2,8 +2,8 @@ import unittest
 
 from hyperon import *
 
-class AtomTest(unittest.TestCase):
 
+class AtomTest(unittest.TestCase):
     def test_check_type(self):
         space = GroundingSpace()
         space.add_atom(E(S(":"), S("a"), S("A")))
@@ -27,6 +27,5 @@ class AtomTest(unittest.TestCase):
         space.add_atom(E(S(":"), S("foo"), E(S("->"), S("A"), S("B"))))
 
         self.assertEqual(get_atom_types(space, E(S("foo"), S("a"))), [S("B")])
-        self.assertEqual(get_atom_types(space, E(S("foo"), S("b"))),
-                [])
+        self.assertEqual(get_atom_types(space, E(S("foo"), S("b"))), [])
         self.assertEqual(get_atom_types(space, S("foo")), [E(S("->"), S("A"), S("B"))])
