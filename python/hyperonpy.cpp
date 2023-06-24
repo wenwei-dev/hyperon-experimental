@@ -26,9 +26,21 @@ using CTokenizer = CPtr<tokenizer_t>;
 using CStepResult = CPtr<step_result_t>;
 using CMetta = CPtr<metta_t>;
 
-static void copy_to_string(char const* cstr, void* context) {
-    std::string* cppstr = static_cast<std::string*>(context);
-    cppstr->assign(cstr);
+// Returns a string, created by executing a function that writes string data into a buffer
+typedef size_t (*write_to_buf_func_t)(void*, char*, size_t);
+std::string func_to_string(write_to_buf_func_t func, void* arg) {
+    //First try with a 1K stack buffer, because that will work in the vast majority of cases
+    char dst_buf[1024];
+    size_t len = func(arg, dst_buf, 1024);
+    if (len < 1024) {
+        return std::string(dst_buf);
+    } else {
+        std::string new_string = std::string();
+        new_string.resize(len+1); //Room for the terminator in the allocated buffer
+        func(arg, new_string.data(), len+1);
+        new_string.resize(len); //But the C++ string doesn't include the terminator in its len
+        return new_string;
+    }
 }
 
 static void copy_atoms(atom_array_t atoms, void* context) {
@@ -176,6 +188,157 @@ void py_free(struct gnd_t* _cgnd) {
     delete static_cast<GroundedObject const*>(_cgnd);
 }
 
+extern "C" {
+    bindings_set_t *py_space_query(const struct space_params_t *params, const struct atom_t *atom);
+    vec_atom_t *py_space_subst(const struct space_params_t *params, const struct atom_t *pattern, const struct atom_t *tmpl);
+    void py_space_add(const struct space_params_t *params, struct atom_t *atom);
+    bool py_space_remove(const struct space_params_t *params, const struct atom_t *atom);
+    bool py_space_replace(const struct space_params_t *params, const struct atom_t *from, struct atom_t *to);
+    ssize_t py_space_atom_count(const struct space_params_t *params);
+    void *py_space_new_atom_iter_state(const struct space_params_t *params);
+    const atom_t *py_space_iter_next_atom(const struct space_params_t *params, void *state);
+    void py_space_free_atom_iter_state(const struct space_params_t *params, void *state);
+    void py_space_free_payload(void *payload);
+}
+
+const space_api_t PY_SPACE_NO_SUBST_API = {
+    &py_space_query,
+    NULL, //TODO: &py_space_subst
+    &py_space_add,
+    &py_space_remove,
+    &py_space_replace,
+    &py_space_atom_count,
+    &py_space_new_atom_iter_state,
+    &py_space_iter_next_atom,
+    &py_space_free_atom_iter_state,
+    &py_space_free_payload };
+
+struct PySpace {
+    PySpace(py::object pyobj) : pyobj(pyobj) {
+    }
+    virtual ~PySpace() {
+    }
+    py::object pyobj;
+};
+
+bindings_set_t *py_space_query(const struct space_params_t *params, const struct atom_t *query_atom) {
+    py::object hyperon = py::module_::import("hyperon");
+    py::function call_query_on_python_space = hyperon.attr("call_query_on_python_space");
+    py::object pyobj = static_cast<PySpace const *>(params->payload)->pyobj;
+    CAtom catom = atom_clone(query_atom);
+    py::object result = call_query_on_python_space(pyobj, catom);
+    const CBindingsSet &set = result.attr("c_set").cast<CBindingsSet>();
+    return bindings_set_clone(set.ptr);
+}
+
+//TODO, currently Python spaces use the default subst implementation
+// vec_atom_t *py_space_subst(const struct space_params_t *params, const struct atom_t *pattern, const struct atom_t *tmpl) {
+//     //TODO
+// }
+
+void py_space_add(const struct space_params_t *params, struct atom_t *atom) {
+    py::object hyperon = py::module_::import("hyperon");
+    py::function call_add_on_python_space = hyperon.attr("call_add_on_python_space");
+    py::object pyobj = static_cast<PySpace const *>(params->payload)->pyobj;
+    atom_t* notify_atom = atom_clone(atom);
+    CAtom catom = atom;
+    call_add_on_python_space(pyobj, catom);
+
+    //TODO: Create a mechanism so the Python code can do the notification manually, and bypass this
+    // automatic notification code
+    space_event_t* event = space_event_new_add(notify_atom);
+    space_params_notify_all_observers(params, event);
+    space_event_free(event);
+}
+
+bool py_space_remove(const struct space_params_t *params, const struct atom_t *atom) {
+    py::object hyperon = py::module_::import("hyperon");
+    py::function call_remove_on_python_space = hyperon.attr("call_remove_on_python_space");
+    py::object pyobj = static_cast<PySpace const *>(params->payload)->pyobj;
+    atom_t* notify_atom = atom_clone(atom);
+    CAtom catom = atom_clone(atom);
+    py::object result = call_remove_on_python_space(pyobj, catom);
+    if (result.cast<bool>()) {
+        //TODO: See comment about manual notification above
+        space_event_t* event = space_event_new_remove(notify_atom);
+        space_params_notify_all_observers(params, event);
+        space_event_free(event);
+        return true;
+    } else {
+        atom_free(notify_atom);
+        return false;
+    }
+}
+
+bool py_space_replace(const struct space_params_t *params, const struct atom_t *from, struct atom_t *to) {
+    py::object hyperon = py::module_::import("hyperon");
+    py::function call_replace_on_python_space = hyperon.attr("call_replace_on_python_space");
+    py::object pyobj = static_cast<PySpace const *>(params->payload)->pyobj;
+    atom_t* notify_from = atom_clone(from);
+    atom_t* notify_to = atom_clone(to);
+    CAtom catom_from = atom_clone(from);
+    CAtom catom_to = to;
+    py::object result = call_replace_on_python_space(pyobj, catom_from, catom_to);
+    if (result.cast<bool>()) {
+        //TODO: See comment about manual notification above
+        space_event_t* event = space_event_new_replace(notify_from, notify_to);
+        space_params_notify_all_observers(params, event);
+        space_event_free(event);
+        return true;
+    } else {
+        atom_free(notify_from);
+        atom_free(notify_to);
+        return false;
+    }
+}
+
+ssize_t py_space_atom_count(const struct space_params_t *params) {
+    py::object hyperon = py::module_::import("hyperon");
+    py::function call_atom_count_on_python_space = hyperon.attr("call_atom_count_on_python_space");
+    py::object pyobj = static_cast<PySpace const *>(params->payload)->pyobj;
+    py::int_ result = call_atom_count_on_python_space(pyobj);
+    return result.cast<ssize_t>();
+}
+
+void *py_space_new_atom_iter_state(const struct space_params_t *params) {
+    py::object hyperon = py::module_::import("hyperon");
+    py::function call_new_iter_state_on_python_space = hyperon.attr("call_new_iter_state_on_python_space");
+    py::object pyobj = static_cast<PySpace const *>(params->payload)->pyobj;
+    py::object result = call_new_iter_state_on_python_space(pyobj);
+    if (result.is_none()) {
+        return NULL;
+    } else {
+        py::function iter_init_fn = result.attr("__iter__");
+        iter_init_fn();
+        py::object* iter_buf = new py::object(result);
+        return (void*)iter_buf;
+    }
+}
+
+const atom_t *py_space_iter_next_atom(const struct space_params_t *params, void *state) {
+    py::object* iter_buf = (py::object*)state;
+    py::function next_fn = iter_buf->attr("__next__");
+    try {
+        py::object atom = next_fn();
+        return atom.attr("catom").cast<CAtom>().ptr;
+    } catch (pybind11::error_already_set &e) {
+        if (e.matches(PyExc_StopIteration)) {
+            return NULL;
+        } else {
+            throw;
+        }
+    }
+}
+
+void py_space_free_atom_iter_state(const struct space_params_t *params, void *state) {
+    py::object* iter_buf = (py::object*)state;
+    delete iter_buf;
+}
+
+void py_space_free_payload(void *payload) {
+    delete static_cast<PySpace const*>(payload);
+}
+
 void copy_to_list_callback(var_atom_t const* varAtom, void* context){
 
     pybind11::list& var_atom_list = *( (pybind11::list*)(context) );
@@ -259,23 +422,34 @@ PYBIND11_MODULE(hyperonpy, m) {
             return CAtom(atom_expr(children, size));
         }, "Create expression atom");
     m.def("atom_gnd", [](py::object object, CAtom ctyp) {
-            atom_t* typ = atom_clone(ctyp.ptr);
-            return CAtom(atom_gnd(new GroundedObject(object, typ)));
+            if (py::hasattr(object, "cspace")) {
+                //TODO: We should make static constant type atoms, so we don't need to allocate and then
+                // free them, just to test a constant 
+                atom_t* undefined = ATOM_TYPE_UNDEFINED();
+                if (!atom_eq(ctyp.ptr, undefined)) {
+                    throw std::runtime_error("Grounded Space Atoms can't have a custom type");
+                }
+                atom_free(undefined);
+                space_t* space = object.attr("cspace").cast<CSpace>().ptr;
+                return CAtom(atom_gnd_for_space(space));
+            } else {
+                atom_t* typ = atom_clone(ctyp.ptr);
+                return CAtom(atom_gnd(new GroundedObject(object, typ)));
+            }
             }, "Create grounded atom");
     m.def("atom_free", [](CAtom atom) { atom_free(atom.ptr); }, "Free C atom");
 
     m.def("atom_eq", [](CAtom a, CAtom b) -> bool { return atom_eq(a.ptr, b.ptr); }, "Test if two atoms are equal");
     m.def("atom_to_str", [](CAtom atom) {
-            std::string str;
-            atom_to_str(atom.ptr, copy_to_string, &str);
-            return str;
+            return func_to_string((write_to_buf_func_t)&atom_to_str, atom.ptr);
         }, "Convert atom to human readable string");
     m.def("atom_get_type", [](CAtom atom) { return atom_get_type(atom.ptr); }, "Get type of the atom");
     m.def("atom_get_name", [](CAtom atom) {
-            std::string str;
-            atom_get_name(atom.ptr, copy_to_string, &str);
-            return str;
+            return func_to_string((write_to_buf_func_t)&atom_get_name, atom.ptr);
         }, "Get name of the Symbol or Variable atom");
+    m.def("atom_get_space", [](CAtom atom) {
+            return CSpace(space_clone_ref(atom_get_space(atom.ptr)));
+        }, "Get the space inside of a Grounded atom wrapping a space");
     m.def("atom_get_object", [](CAtom atom) {
             return static_cast<GroundedObject const*>(atom_get_object(atom.ptr))->pyobj;
         }, "Get object of the grounded atom");
@@ -287,9 +461,17 @@ PYBIND11_MODULE(hyperonpy, m) {
             atom_get_children(atom.ptr, copy_atoms, &atoms);
             return atoms;
         }, "Get children atoms of the expression");
+    m.def("atom_iterate", [](CAtom atom) -> pybind11::list {
+            pybind11::list atoms_list;
+            atom_iterate(atom.ptr, atom_copy_to_list_callback, &atoms_list);
+            return atoms_list;
+        }, "Returns iterator to traverse child atoms recursively, depth first");
+    m.def("atom_match_atom", [](CAtom a, CAtom b) -> CBindingsSet {
+            return CBindingsSet(atom_match_atom(a.ptr, b.ptr));
+        }, "Matches one atom against another, establishing Bindings between variables");
     m.def("atoms_are_equivalent", [](CAtom first, CAtom second) {
-            return atoms_are_equivalent(first.ptr, second.ptr); },
-            "Check atom for equivalence");
+            return atoms_are_equivalent(first.ptr, second.ptr);
+        }, "Check atom for equivalence");
 
     py::class_<CVecAtom>(m, "CVecAtom");
     m.def("vec_atom_new", []() { return CVecAtom(vec_atom_new()); }, "New vector of atoms");
@@ -315,6 +497,10 @@ PYBIND11_MODULE(hyperonpy, m) {
           "Links variable to atom" );
     m.def("bindings_is_empty", [](CBindings bindings){ return bindings_is_empty(bindings.ptr);}, "Returns true if bindings is empty");
 
+    m.def("bindings_narrow_vars", [](CBindings bindings, CVecAtom vars) {
+            bindings_narrow_vars(bindings.ptr, vars.ptr);
+        }, "Remove vars from Bindings, except those specified" );
+
     m.def("bindings_resolve", [](CBindings bindings, char const* varName) -> std::optional<CAtom> {
             auto const res = bindings_resolve(bindings.ptr, varName);
             return nullptr == res ? std::nullopt : std::optional(CAtom(res));
@@ -326,9 +512,7 @@ PYBIND11_MODULE(hyperonpy, m) {
         }, "Resolve and remove" );
 
     m.def("bindings_to_str", [](CBindings bindings) {
-        std::string str;
-        bindings_to_str(bindings.ptr, copy_to_string, &str);
-        return str;
+        return func_to_string((write_to_buf_func_t)&bindings_to_str, bindings.ptr);
     }, "Convert bindings to human readable string");
 
     m.def("bindings_list", [](CBindings bindings) -> pybind11::list {
@@ -355,9 +539,7 @@ PYBIND11_MODULE(hyperonpy, m) {
         return bindings_set_is_single(set.ptr);
     }, "Returns true if BindingsSet contains no variable bindings (unconstrained)");
     m.def("bindings_set_to_str", [](CBindingsSet set) {
-        std::string str;
-        bindings_set_to_str(set.ptr, copy_to_string, &str);
-        return str;
+        return func_to_string((write_to_buf_func_t)&bindings_set_to_str, set.ptr);
     }, "Convert BindingsSet to human readable string");
     m.def("bindings_set_clone", [](CBindingsSet set) { return CBindingsSet(bindings_set_clone(set.ptr)); }, "Deep copy of BindingsSet");
     m.def("bindings_set_from_bindings", [](CBindings bindings) { bindings_t* cloned_bindings = bindings_clone(bindings.ptr); return CBindingsSet(bindings_set_from_bindings(cloned_bindings)); }, "New BindingsSet from existing Bindings");
@@ -383,18 +565,25 @@ PYBIND11_MODULE(hyperonpy, m) {
 
     py::class_<CSpace>(m, "CSpace");
     m.def("space_new_grounding", []() { return CSpace(space_new_grounding_space()); }, "New grounding space instance");
+    m.def("space_new_custom", [](py::object object) {
+        return CSpace( space_new(&PY_SPACE_NO_SUBST_API, new PySpace(object)));
+        }, "Create new custom space implemented in Python");
     m.def("space_free", [](CSpace space) { space_free(space.ptr); }, "Free space");
+    m.def("space_get_payload", [](CSpace space) {
+        PySpace* py_space = (PySpace*)space_get_payload(space.ptr);
+        return py_space->pyobj;
+        }, "Accessor for the payload of a space implemented in Python");
     m.def("space_add", [](CSpace space, CAtom atom) { space_add(space.ptr, atom_clone(atom.ptr)); }, "Add atom into space");
     m.def("space_remove", [](CSpace space, CAtom atom) { return space_remove(space.ptr, atom.ptr); }, "Remove atom from space");
     m.def("space_replace", [](CSpace space, CAtom from, CAtom to) { return space_replace(space.ptr, from.ptr, atom_clone(to.ptr)); }, "Replace atom from space");
     m.def("space_eq", [](CSpace a, CSpace b) { return space_eq(a.ptr, b.ptr); }, "Check if two spaces are equal");
-    m.def("space_len", [](CSpace space) { return space_atom_count(space.ptr); }, "Return number of atoms in space, or -1 if the space is unable to determine the value");
+    m.def("space_atom_count", [](CSpace space) { return space_atom_count(space.ptr); }, "Return number of atoms in space, or -1 if the space is unable to determine the value");
     m.def("space_list", [](CSpace space) -> std::optional<pybind11::list> {
         pybind11::list atoms_list;
         if (space_iterate(space.ptr, atom_copy_to_list_callback, &atoms_list)) {
             return atoms_list;
         } else {
-            return pybind11::none();
+            return std::nullopt;
         }
     }, "Returns iterator to traverse atoms within a space");
     m.def("space_query", [](CSpace space, CAtom pattern) {
@@ -429,9 +618,7 @@ PYBIND11_MODULE(hyperonpy, m) {
 
     py::class_<CStepResult>(m, "CStepResult")
         .def("__str__", [](CStepResult step) {
-            std::string str;
-            step_to_str(step.ptr, copy_to_string, &str);
-            return str;
+            return func_to_string((write_to_buf_func_t)&step_to_str, step.ptr);
         }, "Convert step to human readable string");
     m.def("interpret_init", [](CSpace space, CAtom expr) {
             return CStepResult(interpret_init(space.ptr, expr.ptr));
@@ -457,7 +644,8 @@ PYBIND11_MODULE(hyperonpy, m) {
         ADD_TYPE(SYMBOL, "Symbol")
         ADD_TYPE(VARIABLE, "Variable")
         ADD_TYPE(EXPRESSION, "Expression")
-        ADD_TYPE(GROUNDED, "Grounded");
+        ADD_TYPE(GROUNDED, "Grounded")
+        ADD_TYPE(GROUNDED_SPACE, "Space");
     m.def("check_type", [](CSpace space, CAtom atom, CAtom type) {
             return check_type(space.ptr, atom.ptr, type.ptr);
         }, "Check if atom is an instance of the passed type");

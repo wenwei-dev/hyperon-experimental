@@ -1,6 +1,8 @@
 use hyperon::*;
+use hyperon::space::DynSpace;
 
 use crate::util::*;
+use crate::space::*;
 
 use std::os::raw::*;
 use std::fmt::Display;
@@ -97,11 +99,13 @@ pub extern "C" fn bindings_clone(bindings: *const bindings_t) -> *mut bindings_t
     bindings_into_ptr(unsafe{ &(*bindings) }.bindings.clone())
 }
 
+/// Writes a text description of the bindings_t into the provided buffer and returns the number of bytes
+/// written, or that would have been written had the buf_len been large enough, excluding the
+/// string terminator.
 #[no_mangle]
-pub extern "C" fn bindings_to_str(bindings: *const bindings_t, callback: c_str_callback_t, context: *mut c_void) {
+pub extern "C" fn bindings_to_str(bindings: *const bindings_t, buf: *mut c_char, buf_len: usize) -> usize {
     let bindings = unsafe{ &(*bindings).bindings };
-    let s = str_as_cstr(bindings.to_string().as_str());
-    callback(s.as_ptr(), context);
+    write_into_buf(bindings, buf, buf_len)
 }
 
 #[no_mangle]
@@ -262,11 +266,13 @@ pub extern "C" fn bindings_set_eq(set: *const bindings_set_t, other: *const bind
     set == other
 }
 
+/// Writes a text description of the bindings_set_t into the provided buffer and returns the number of bytes
+/// written, or that would have been written had the buf_len been large enough, excluding the
+/// string terminator.
 #[no_mangle]
-pub extern "C" fn bindings_set_to_str(set: *const bindings_set_t, callback: c_str_callback_t, context: *mut c_void) {
+pub extern "C" fn bindings_set_to_str(set: *const bindings_set_t, buf: *mut c_char, buf_len: usize) -> usize {
     let set = unsafe{ &(*set).set };
-    let s = str_as_cstr(set.to_string().as_str());
-    callback(s.as_ptr(), context);
+    write_into_buf(set, buf, buf_len)
 }
 
 #[no_mangle]
@@ -354,6 +360,15 @@ pub extern "C" fn atom_gnd(gnd: *mut gnd_t) -> *mut atom_t {
     atom_into_ptr(Atom::gnd(CGrounded(AtomicPtr::new(gnd))))
 }
 
+/// Returns a new grounded `atom_t` referencing the space
+/// 
+/// This function does not consume the space and the space still must be freed with `space_free`
+#[no_mangle]
+pub extern "C" fn atom_gnd_for_space(space: *mut space_t) -> *mut atom_t {
+    let space = unsafe { &(*space).0 };
+    atom_into_ptr(Atom::gnd(space.clone()))
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn atom_get_type(atom: *const atom_t) -> atom_type_t {
     match (*atom).atom {
@@ -364,19 +379,24 @@ pub unsafe extern "C" fn atom_get_type(atom: *const atom_t) -> atom_type_t {
     }
 }
 
+/// Writes a text description of the atom into the provided buffer and returns the number of bytes
+/// written, or that would have been written had the buf_len been large enough, excluding the
+/// string terminator.
 #[no_mangle]
-pub extern "C" fn atom_to_str(atom: *const atom_t, callback: c_str_callback_t, context: *mut c_void) {
+pub extern "C" fn atom_to_str(atom: *const atom_t, buf: *mut c_char, buf_len: usize) -> usize {
     let atom = unsafe{ &(*atom).atom };
-    callback(str_as_cstr(atom.to_string().as_str()).as_ptr(), context);
+    write_into_buf(atom, buf, buf_len)
 }
 
-
+/// Writes the name of the atom into the provided buffer and returns the number of bytes
+/// written, or that would have been written had the buf_len been large enough, excluding the
+/// string terminator.
 #[no_mangle]
-pub extern "C" fn atom_get_name(atom: *const atom_t, callback: c_str_callback_t, context: *mut c_void) {
+pub extern "C" fn atom_get_name(atom: *const atom_t, buf: *mut c_char, buf_len: usize) -> usize {
     let atom = unsafe{ &(*atom).atom };
     match atom {
-        Atom::Symbol(s) => callback(str_as_cstr(s.name()).as_ptr(), context),
-        Atom::Variable(v) => callback(string_as_cstr(v.name()).as_ptr(), context),
+        Atom::Symbol(s) => write_into_buf(s.name(), buf, buf_len),
+        Atom::Variable(v) => write_into_buf(v.name(), buf, buf_len),
         _ => panic!("Only Symbol and Variable has name attribute!"),
     }
 }
@@ -390,6 +410,20 @@ pub unsafe extern "C" fn atom_get_object(atom: *const atom_t) -> *mut gnd_t {
         }
     } else {
         panic!("Only Grounded has object attribute!");
+    }
+}
+
+/// Returns a space_t from a grounded atom referencing the space
+/// 
+/// The returned space is borrowed from the atom, and should not be freed nor accessed after the atom
+/// has been freed.
+#[no_mangle]
+pub unsafe extern "C" fn atom_get_space(atom: *const atom_t) -> *const space_t {
+    let atom = &(*atom).atom;
+    if let Some(space) = Atom::as_gnd::<DynSpace>(atom) {
+        (space as *const DynSpace).cast()
+    } else {
+        panic!("Atom does not reference a space");
     }
 }
 

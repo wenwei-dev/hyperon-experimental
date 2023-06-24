@@ -25,6 +25,16 @@ class Atom:
         """Gets the type of this Atom"""
         return hp.atom_get_type(self.catom)
 
+    def iterate(self):
+        res = hp.atom_iterate(self.catom)
+        result = []
+        for r in res:
+            result.append(Atom._from_catom(r))
+        return result
+
+    def match_atom(self, b):
+        return BindingsSet(hp.atom_match_atom(self.catom, b.catom))
+
     @staticmethod
     def _from_catom(catom):
         """Constructs an Atom from C Atom of the same type"""
@@ -97,6 +107,7 @@ class AtomType:
     VARIABLE = Atom._from_catom(hp.CAtomType.VARIABLE)
     EXPRESSION = Atom._from_catom(hp.CAtomType.EXPRESSION)
     GROUNDED = Atom._from_catom(hp.CAtomType.GROUNDED)
+    GROUNDED_SPACE = Atom._from_catom(hp.CAtomType.GROUNDED_SPACE)
 
 
 class GroundedAtom(Atom):
@@ -114,7 +125,11 @@ class GroundedAtom(Atom):
         super().__init__(catom)
 
     def get_object(self):
-        return hp.atom_get_object(self.catom)
+        from .base import Space
+        if self.get_grounded_type() == AtomType.GROUNDED_SPACE:
+            return Space._from_cspace(hp.atom_get_space(self.catom))
+        else:
+            return hp.atom_get_object(self.catom)
 
     def get_grounded_type(self):
         return Atom._from_catom(hp.atom_get_grounded_type(self.catom))
@@ -293,6 +308,13 @@ class Bindings:
 
     def is_empty(self) -> bool:
         return hp.bindings_is_empty(self.cbindings)
+
+    def narrow_vars(self, vars ):
+        cvars = hp.CVecAtom = hp.vec_atom_new()
+        for var in vars:
+            hp.vec_atom_push(cvars, var.catom)
+        hp.bindings_narrow_vars(self.cbindings, cvars)
+        hp.vec_atom_free(cvars)
 
     def resolve(self, var_name: str) -> Union[Atom, None]:
         raw_atom = hp.bindings_resolve(self.cbindings, var_name)
